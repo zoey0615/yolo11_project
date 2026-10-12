@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+runs/
+dataset_*/
+test_image_*/
+temp_*/
+*.pt
+*.yaml
+!yolo11/**/*.yaml
+*.txt
+.vscode/
+.idea/
