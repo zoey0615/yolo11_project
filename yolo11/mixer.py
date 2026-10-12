@@ -187,7 +187,8 @@ class MixerMixin:
                     continue
                 cand = real[tr].tolist() if s == 'dibas' else synth[s]
                 targets = {k: round(N * r) for k in class_ids}
-                chosen, cur = greedy_select({n: cnt[n] for n in cand}, targets, self.mix_seed)
+                sel_seed = self.mix_seed if s == 'dibas' else self.mix_seed + i
+                chosen, cur = greedy_select({n: cnt[n] for n in cand}, targets, sel_seed)
                 train_names += chosen
                 fold_total.update(cur)
                 short = [k for k in class_ids if cur[k] < targets[k] * 0.95]

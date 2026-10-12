@@ -139,7 +139,7 @@ class EvaluatorMixin:
         if self.is_mixed:
             print(f"[標籤轉換] 測試集物種: {species if species else '未指定（視為已是最終 ID 或原始 10/11/20/21）'}")
         return label_map #回傳該物種的轉換字典表
-
+#輸入:測試集資料夾PATH物件、要處理的影像檔名清單、標籤 ID轉換字典、暫存評估資料夾path物件
     def _prepare_eval_dataset(self, test_path, image_list, label_map, eval_temp_dir):
         """建立評估暫存資料夾：影像轉灰階、標籤轉最終 ID。"""
         shutil.rmtree(eval_temp_dir, ignore_errors=True)   # 清掉上次中斷留下的殘留
@@ -148,7 +148,7 @@ class EvaluatorMixin:
         eval_img_dir.mkdir(parents=True, exist_ok=True)
         eval_label_dir.mkdir(parents=True, exist_ok=True)
 
-        processed_img_paths = []
+        processed_img_paths = [] #已完成預處理的測試圖片絕對路徑清單
         all_out_ids = set()
         print(f"\n==================== 正在預處理測試集影像 (自動轉灰階) ====================")
         for img_name in image_list:
