@@ -66,7 +66,7 @@ class EvaluatorMixin:
         species: 僅混合模式使用，測試集標籤所屬物種 ('cocci'/'bacilli')。
                  None 時由資料夾名稱推測；已合併的 test_image_all 不需指定
         """
-        run_id = f'{self.name}_{tag}' if tag else self.name    # 所有輸出名稱都用它
+        run_id = f'{self.name}_{tag}' if tag else self.name    # (模式+菌種名稱)所有輸出名稱都用它
         if image_source is None:
             image_source = f'./test_image_{self.name}'
 
@@ -77,22 +77,24 @@ class EvaluatorMixin:
         label_map = self._resolve_eval_label_map(test_path, species)  #回傳該物種的轉換字典表
 
         # 1. 預處理：影像轉灰階、標籤轉最終 ID，放進暫存資料夾
-        eval_temp_dir = Path(f'./temp_test_eval_{run_id}')
-        eval_img_dir, processed_img_paths = self._prepare_eval_dataset(test_path, image_list, label_map, eval_temp_dir)
+        eval_temp_dir = Path(f'./temp_test_eval_{run_id}') #暫存評估資料夾path物件
+        #回傳 (暫存影像資料夾, 處理後影像的絕對路徑清單)
+        eval_img_dir, processed_img_paths = self._prepare_eval_dataset(test_path, image_list, label_map, eval_temp_dir) #建立暫存資料夾：影像轉灰階、標籤轉最終 ID。
+        #回傳:灰階後的圖片絕對路徑清單文字檔、測試集yaml設定檔
         test_txt_path, test_yaml_path = self._write_eval_files(run_id, processed_img_paths, eval_temp_dir)
 
         # 2. 評估（mAP / Precision / Recall）
         model = YOLO(model_name)
         print(f"\n==================== 開始評估測試集指標 (mAP / Precision / Recall) ====================")
         eval_run_name = f'test_evaluation_{run_id}'
-        metrics = model.val(
+        metrics = model.val( #進行模型推論與真實答案比對
             data=test_yaml_path,
             imgsz=self.img_size,
-            name=eval_run_name,
-            split='val',
+            name=eval_run_name, #指定輸出結果的資料夾名稱。
+            split='val', #YOLO 執行時只會去讀取 YAML 裡的 val 欄位
             exist_ok=True          # 同名資料夾直接覆蓋，避免 Ultralytics 自動改名成 xxx2，導致圖表與 CSV 分家
         )
-        overall = self._print_overall_report(run_id, metrics)
+        overall = self._print_overall_report(run_id, metrics) #印出整體指標並回傳 (P, R, mAP50, mAP50-95)
 
         # 3. CSV 報表
         csv_save_path = Path(f'{RUNS_DIR}/{eval_run_name}') / f'test_evaluation_{run_id}.csv'
@@ -139,9 +141,9 @@ class EvaluatorMixin:
         if self.is_mixed:
             print(f"[標籤轉換] 測試集物種: {species if species else '未指定（視為已是最終 ID 或原始 10/11/20/21）'}")
         return label_map #回傳該物種的轉換字典表
-#輸入:測試集資料夾PATH物件、要處理的影像檔名清單、標籤 ID轉換字典、暫存評估資料夾path物件
+#輸入:測試集資料夾PATH物件、要處理的影像檔名清單(包含副檔名)、標籤 ID轉換字典、暫存評估資料夾path物件
     def _prepare_eval_dataset(self, test_path, image_list, label_map, eval_temp_dir):
-        """建立評估暫存資料夾：影像轉灰階、標籤轉最終 ID。"""
+        """建立暫存資料夾：影像轉灰階、標籤轉最終 ID。"""
         shutil.rmtree(eval_temp_dir, ignore_errors=True)   # 清掉上次中斷留下的殘留
         eval_img_dir = eval_temp_dir / 'images'
         eval_label_dir = eval_temp_dir / 'labels'
@@ -149,7 +151,7 @@ class EvaluatorMixin:
         eval_label_dir.mkdir(parents=True, exist_ok=True)
 
         processed_img_paths = [] #已完成預處理的測試圖片絕對路徑清單
-        all_out_ids = set()
+        all_out_ids = set() #測試集中被轉換後的最終類別 ID集合
         print(f"\n==================== 正在預處理測試集影像 (自動轉灰階) ====================")
         for img_name in image_list:
             gray = read_gray_3ch(test_path / img_name) #輸入:單張影像的檔案路徑path物件 回傳:複製成 3 通道的灰階影像矩陣
@@ -157,26 +159,26 @@ class EvaluatorMixin:
                 continue
             save_img_path = eval_img_dir / img_name
             cv2.imwrite(str(save_img_path), gray)
-            processed_img_paths.append(str(save_img_path.resolve()))
+            processed_img_paths.append(str(save_img_path.resolve())) #將一個路徑物件轉換成該檔案在電腦硬碟中的完整絕對路徑物件
 
-            label_path = test_path / (Path(img_name).stem + '.txt')
+            label_path = test_path / (Path(img_name).stem + '.txt') #取出檔名（不包含副檔名）
             if label_path.exists():
                 with open(label_path, 'r') as f:
                     lines = f.readlines()
             #回傳: 新標籤內容清單、輸出類別ID 集合
                 new_lines, out_ids = convert_label_lines(lines, label_map) #輸入:標籤內容清單、類別ID對應表
-                all_out_ids |= out_ids
+                all_out_ids |= out_ids #聯集=all_out_ids = all_out_ids | out_ids
                 with open(eval_label_dir / label_path.name, 'w') as f:
                     f.writelines(new_lines)
 
         # 轉換後 ID 必須落在 0 ~ num_classes-1，否則 YOLO 會悄悄忽略或報錯
-        bad_ids = all_out_ids - set(range(self.num_classes))
+        bad_ids = all_out_ids - set(range(self.num_classes)) #range():產生一連串的整數
         if bad_ids:
             print(f"警告：轉換後仍有超出範圍的類別 ID: {sorted(bad_ids)}，請檢查測試集標籤或 species 設定")
         return eval_img_dir, processed_img_paths #回傳 (暫存影像資料夾, 處理後影像的絕對路徑清單)
-
+#輸入:(模式+菌種名稱)後綴、灰階後的圖片絕對路徑清單、暫存評估資料夾路徑
     def _write_eval_files(self, run_id, processed_img_paths, eval_temp_dir):
-        """寫評估用的影像清單檔與 data yaml；回傳 (清單檔路徑, yaml 路徑)"""
+        """為 YOLO 模型的評估流程準備並寫入清單文字檔與「設定檔（YAML）」。"""
         test_txt_path = f'./test_eval_list_{run_id}.txt'
         with open(test_txt_path, 'w') as f:
             for p in processed_img_paths:
@@ -184,15 +186,15 @@ class EvaluatorMixin:
         test_yaml_path = f'test_eval_{run_id}.yaml'
         write_data_yaml(test_yaml_path, test_txt_path, test_txt_path, eval_temp_dir, #輸入:YAML檔案路徑、訓練/驗證/測試圖片清單絕對路徑文字檔、資料集根目錄、類別總數、類別名稱清單
                         self.num_classes, self.class_names, test=test_txt_path)
-        return test_txt_path, test_yaml_path
+        return test_txt_path, test_yaml_path #回傳:灰階後的圖片絕對路徑清單文字檔、測試集yaml設定檔
 
     @staticmethod
-    def _print_overall_report(run_id, metrics):
+    def _print_overall_report(run_id, metrics): #輸入:(模式+菌種名稱)後綴、驗證/評估結果物件
         """印出整體指標並回傳 (P, R, mAP50, mAP50-95)"""
-        p = float(metrics.box.mp)
-        r = float(metrics.box.mr)
-        map50 = float(metrics.box.map50)
-        map95 = float(metrics.box.map)
+        p = float(metrics.box.mp) # Mean Precision (所有類別的平均精確度)
+        r = float(metrics.box.mr) # Mean Recall (所有類別的平均召回率)
+        map50 = float(metrics.box.map50) # mAP@0.5 (全體在門檻0.5下的平均精度)
+        map95 = float(metrics.box.map) # mAP@0.5:0.95
         print("\n" + "=" * 50)
         print(f"【獨立測試集評估報告 - {run_id}】")
         print(f" Precision  : {p:.4f}")
@@ -201,20 +203,20 @@ class EvaluatorMixin:
         print(f" mAP50-95   : {map95:.4f}")
         print("=" * 50)
         return p, r, map50, map95
-
+#輸入:驗證/評估結果物件、CSV 檔案的儲存目標路徑、 (P, R, mAP50, mAP50-95)值組
     def _write_metrics_csv(self, metrics, csv_save_path, overall):
-        """寫 CSV：整體一列 + 各類別一列。測試集沒有標註的類別以 nan 表示。
-        Precision/Recall/F1 為各類別在 peak F1 門檻下的值；@FIXED_CONF 欄為固定門檻下的值"""
-        p, r, map50, map95 = overall
+        """寫 CSV：整體一列 + 各類別一列。"""
+        p, r, map50, map95 = overall #序列解包
         csv_save_path.parent.mkdir(parents=True, exist_ok=True)
         p_fx, r_fx, f1_fx = self._prf_at_conf(metrics, FIXED_CONF) #取固定信心門檻下，每個測試集有標註的類別的 P / R / F1
 
         # 峰值 F1 所在的門檻（與 F1_curve.png 圖例一致）
-        f1_mean_curve = np.asarray(metrics.box.f1_curve).mean(0)
-        peak_conf = float(np.asarray(metrics.box.px)[smooth(f1_mean_curve, 0.1).argmax()])
-        f1_all = float(np.mean(metrics.box.f1))   # 各類別 F1 的平均 (macro)
+        f1_mean_curve = np.asarray(metrics.box.f1_curve).mean(0) #全體平均的 F1 曲線，對矩陣的第 0 維度（直向/跨類別）計算平均值
+        #.argmax():找出這條平滑後的 F1 曲線中，數值最高的那一個點，它到底排在第幾個位置（索引值）
+        peak_conf = float(np.asarray(metrics.box.px)[smooth(f1_mean_curve, 0.1).argmax()]) #0.1:Ultralytics 內建的盒狀濾波器比例
+        f1_all = float(np.mean(metrics.box.f1))   # 所有類別的 F1 分數加起來，除以類別總數
 
-        with open(csv_save_path, mode='w', newline='', encoding='utf-8-sig') as csv_file:
+        with open(csv_save_path, mode='w', newline='', encoding='utf-8-sig') as csv_file: #停用 Python 預設的換行字元自動轉換機制
             writer = csv.writer(csv_file) #初始化並建立一個 CSV 寫入器物件。
             writer.writerow(['Class', 'Precision', 'Recall', 'F1', 'mAP50', 'mAP50-95',
                              f'Precision@{FIXED_CONF}', f'Recall@{FIXED_CONF}', f'F1@{FIXED_CONF}',
@@ -242,7 +244,7 @@ class EvaluatorMixin:
                                  f"{class_map50:.4f}", f"{class_map95:.4f}",
                                  f"{fx[0]:.4f}", f"{fx[1]:.4f}", f"{fx[2]:.4f}", ""])
 
-    def _predict_and_save(self, model, eval_img_dir, confidence, run_id):
+    def _predict_and_save(self, model, eval_img_dir, confidence, run_id): #整批大量預測
         """對暫存測試影像做預測，輸出劃有目標框的影像，並逐張印出偵測結果"""
         print(f"\n==================== 開始繪製與輸出劃框影像 ====================")
         results = model.predict(
