@@ -260,5 +260,4 @@ db.run_cross_validation(num_loops=5, custom_hyp=hyp)
 - 混合模式的檔名前綴（`cocci_` / `bacilli_`）是分層切折的依據，請勿隨意改名。
 - 調參與訓練過程會在資料夾內產生暫存檔，正常結束會自動清除；若中途中斷，可手動刪除 `temp_seed_*`、`temp_test_eval_*`、`*_tune_temp` 等殘留資料夾。
 - 來源路徑或內容改變時，`build_source_pool` 與 `build_merged_dataset` 需加上 `force=True` 才會重建。
-- 資料集、模型權重與 `runs/` 檔案很大，已在 `.gitignore` 排除，不會上傳至 GitHub。
 
