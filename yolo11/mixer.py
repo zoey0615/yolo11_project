@@ -15,17 +15,19 @@ mixer：MixerMixin（三來源「固定總量、可調比例」資料集，每�
 trainer.py 只透過 get_kfold_splits() 取得切分，因此不需要修改。
 """
 import json
-import random
+import random #引入 Python 內建的隨機數產生模組
 import shutil
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict #計數器字典物件、帶預設VALUE的字典
 from pathlib import Path
 
 import numpy as np
 from sklearn.model_selection import KFold, StratifiedKFold
-
+  
+# K-Fold 切分種子、混合測試集相對路徑path物件、混合資料集輸出根目錄path物件、三種訓練資料來源值組
 from .config import BASE_SEED, MERGED_TEST_DIR, MIX_ROOT, SOURCE_NAMES
+#轉換第一欄位後的YOLO 標籤檔、利用影像檔名轉換標籤檔名、利用影像檔名前綴取得物種字串
 from .labels import convert_label_lines, label_name_of, species_of
-from .staging import list_image_names
+from .staging import list_image_names #影像資料夾內排序後的影像檔名清單(含副檔名)
 
 
 def source_of(name):
@@ -40,9 +42,9 @@ def greedy_select(items, targets, seed):
     固定種子隨機排序後逐張檢查：加入後任何類別超標就跳過，直到所有類別達標。
     回傳 (被選中檔名清單, 實際各類別實例數 Counter)
     """
-    rng = random.Random(seed)
-    names = sorted(items)
-    rng.shuffle(names)
+    rng = random.Random(seed) #建立隨機數產生器物件
+    names = sorted(items) #對一個「字典」進行 sorted() 排序時，把字典裡所有的鍵抽出來排序，然後回傳清單
+    rng.shuffle(names) #把原本排序清單內部順序打亂:費雪耶茨向梅森旋轉索取亂數
     cur, chosen = Counter(), []
     for n in names:
         cnt = items[n]
@@ -74,10 +76,11 @@ class MixerMixin:
             prefix = sp if self.is_mixed else 'bact'
 
             for name in list_image_names(img_dir):
-                lp = lbl_dir / label_name_of(name)
+                lp = lbl_dir / label_name_of(name) #輸入:影像檔名(含副檔名)  回傳標籤檔名
                 if not lp.exists():
                     continue
-                lines, _ = convert_label_lines(lp.read_text().splitlines(), label_map)
+                #回傳:新標籤內容清單、輸出類別ID 集合
+                lines, _ = convert_label_lines(lp.read_text().splitlines(), label_map) #輸入:標籤內容清單、類別ID對應表
                 pool[f'{prefix}_{src}_{name}'] = {'img': img_dir / name, 'lines': lines}
         return pool
 
@@ -109,7 +112,7 @@ class MixerMixin:
         if key not in cache:
             d = {}
             for n in list_image_names(image_dir):
-                lp = lbl_dir / label_name_of(n)
+                lp = lbl_dir / label_name_of(n) #輸入:影像檔名(含副檔名)  回傳標籤檔名
                 lines = lp.read_text().splitlines() if lp.exists() else []
                 d[n] = Counter(int(ln.split()[0]) for ln in lines if ln.split())
             cache[key] = d

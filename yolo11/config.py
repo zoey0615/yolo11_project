@@ -16,7 +16,7 @@ TUNE_EPOCHS = 20                             # 調參時每次嘗試的訓練輪
 FIXED_CONF = 0.5                             # CSV 報表中 Precision/Recall/F1@固定門檻 所用的信心門檻
 RUNS_DIR = './runs/detect'                     # Ultralytics 輸出根目錄
 MERGED_DATASET_DIR = Path('dataset_all')     # 混合模式：訓練+驗證資料
-MERGED_TEST_DIR = Path('test_image_all')     # 混合模式：測試集
+MERGED_TEST_DIR = Path('test_image_all')     # 混合測試集相對路徑
 
 SEARCH_SPACE = { # 超參數搜尋邊界 ：針對細菌影像關鍵參數
     'lr0': (1e-4, 1e-2),     # 初始學習率

@@ -98,7 +98,7 @@ class EvaluatorMixin:
 
         # 3. CSV 報表
         csv_save_path = Path(f'{RUNS_DIR}/{eval_run_name}') / f'test_evaluation_{run_id}.csv'
-        self._write_metrics_csv(metrics, csv_save_path, overall)
+        self._write_metrics_csv(metrics, csv_save_path, overall) #寫 CSV：整體一列 + 各類別一列。
         print(f"\n[完成] 數據指標 CSV 檔已儲存至: {csv_save_path}")
 
         # 4. 預測並輸出劃框影像
@@ -208,7 +208,7 @@ class EvaluatorMixin:
         """寫 CSV：整體一列 + 各類別一列。"""
         p, r, map50, map95 = overall #序列解包
         csv_save_path.parent.mkdir(parents=True, exist_ok=True)
-        p_fx, r_fx, f1_fx = self._prf_at_conf(metrics, FIXED_CONF) #取固定信心門檻下，每個測試集有標註的類別的 P / R / F1
+        p_fx, r_fx, f1_fx = self._prf_at_conf(metrics, FIXED_CONF) #取固定信心門檻下，每個測試集有標註的類別的 P / R / F1。（1D Array）(nc,)
 
         # 峰值 F1 所在的門檻（與 F1_curve.png 圖例一致）
         f1_mean_curve = np.asarray(metrics.box.f1_curve).mean(0) #全體平均的 F1 曲線，對矩陣的第 0 維度（直向/跨類別）計算平均值
@@ -225,13 +225,13 @@ class EvaluatorMixin:
                              f"{map50:.4f}", f"{map95:.4f}",
                              f"{p_fx.mean():.4f}", f"{r_fx.mean():.4f}", f"{f1_fx.mean():.4f}",
                              f"{peak_conf:.3f}"])
-
-            cls_pos = {int(c): k for k, c in enumerate(metrics.box.ap_class_index)}
+#(K,C)=(Index,Value)
+            cls_pos = {int(c): k for k, c in enumerate(metrics.box.ap_class_index)} # 這次測試集中「實際有出現」的類別索引清單
             for i, class_name in enumerate(self.class_names):
-                if i in cls_pos:
+                if i in cls_pos: #檢查「字典的鍵（Keys）」
                     k = cls_pos[i]
                     class_p, class_r = float(metrics.box.p[k]), float(metrics.box.r[k])
-                    class_f1 = float(metrics.box.f1[k])
+                    class_f1 = float(metrics.box.f1[k]) #在同一個F1峰值門檻下抓出各類別的 P、R、F1
                     class_map50, class_map95 = float(metrics.box.ap50[k]), float(metrics.box.ap[k])
                     fx = (float(p_fx[k]), float(r_fx[k]), float(f1_fx[k]))
                 else:   # 測試集沒有此類別的標註
@@ -243,23 +243,23 @@ class EvaluatorMixin:
                 writer.writerow([class_name, f"{class_p:.4f}", f"{class_r:.4f}", f"{class_f1:.4f}",
                                  f"{class_map50:.4f}", f"{class_map95:.4f}",
                                  f"{fx[0]:.4f}", f"{fx[1]:.4f}", f"{fx[2]:.4f}", ""])
-
+#輸入:載入好權重的 YOLO 模型物件、暫存影像資料夾、預測信心門檻、(模式+菌種名稱)後綴
     def _predict_and_save(self, model, eval_img_dir, confidence, run_id): #整批大量預測
         """對暫存測試影像做預測，輸出劃有目標框的影像，並逐張印出偵測結果"""
         print(f"\n==================== 開始繪製與輸出劃框影像 ====================")
-        results = model.predict(
-            source=str(eval_img_dir),
+        results = model.predict( #推論與劃框
+            source=str(eval_img_dir), #暫存測試影像資料夾的路徑字串
             imgsz=self.img_size,
-            save=True,
+            save=True, #是否存檔
             conf=confidence,
             project=RUNS_DIR,
             name=f'predict_{run_id}',
             exist_ok=True,
             batch=4,
-            stream=True
+            stream=True #開啟「串流生成器（Generator）」模式。模型不會一口氣把所有圖片的結果全部載入記憶體，而是「跑完一張，就吐出一個 result 物件」。
         )
         for result in results:
-            print(f"\n影像: {Path(result.path).name}")
+            print(f"\n影像: {Path(result.path).name}") #這張圖片在硬碟中的完整絕對路徑字串，絕對路徑切開，只留下最尾端的檔名+副檔名
             print_detections(model, result) #印出單張影像的每個偵測框（類別、信心值、座標）
 
     # ------------------------------------------------------------------ 推論：單張
