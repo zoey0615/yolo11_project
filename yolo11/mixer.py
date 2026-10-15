@@ -5,7 +5,7 @@ mixer：MixerMixin（三來源「固定總量、可調比例」資料集，每�
 這是 Mixin，必須由 DetectBacteria 繼承（排在 DatasetBuilderMixin 之前，才能覆蓋 get_kfold_splits）。
 
 流程：
-  1. build_source_pool()：把三個來源「完整」轉標籤並複製到 dataset_mix/pool/（只需做一次，所有比例組共用）
+  1. build_source_pool()：把三個來源「完整」轉標籤並複製到 dataset_mix/pool/（只需做一次，所有比例組共用）（來源路徑或內容改變時，請用 force=True 重建）
   2. set_mix()：設定這次實驗的比例
   3. get_kfold_splits()：
        a. 只對真實 DIBAS 影像做 K-Fold（驗證集永遠是真實影像）
@@ -30,63 +30,68 @@ from .labels import convert_label_lines, label_name_of, species_of
 from .staging import list_image_names #影像資料夾內排序後的影像檔名清單(含副檔名)
 
 
-def source_of(name):
+def source_of(name): #利用影像檔名(含副檔名)前綴取得來源字串
     """cocci_dibas_001.jpg → 'dibas'；舊格式檔名回傳 None"""
-    parts = name.split('_', 2)
+    parts = name.split('_', 2) #2:最大分割次數
     return parts[1] if len(parts) == 3 and parts[1] in SOURCE_NAMES else None
 
 
-def greedy_select(items, targets, seed):
+def greedy_select(items, targets, seed): 
     """
-    貪心抽圖。items: {檔名: Counter(類別ID→實例數)}；targets: {類別ID: 目標實例數}
-    固定種子隨機排序後逐張檢查：加入後任何類別超標就跳過，直到所有類別達標。
-    回傳 (被選中檔名清單, 實際各類別實例數 Counter)
+    貪心抽圖。
+    候選圖片池的資料字典items: {新格式檔名: Counter({類別ID:實例數,})}；
+    目標數量需求targets: {類別ID: 目標實例數}
     """
     rng = random.Random(seed) #建立隨機數產生器物件
     names = sorted(items) #對一個「字典」進行 sorted() 排序時，把字典裡所有的鍵抽出來排序，然後回傳清單
     rng.shuffle(names) #把原本排序清單內部順序打亂:費雪耶茨向梅森旋轉索取亂數
-    cur, chosen = Counter(), []
+    cur, chosen = Counter(), [] #多重賦值
     for n in names:
-        cnt = items[n]
+        cnt = items[n] #Counter 物件
+        #.items():回傳一個類似清單結構，裡面包含了多個 (鍵, 值) 的 Tuple（值組）
+        #dict.get(key, default_value)回傳value
+        #all():總體判定邏輯判斷函式
         if cnt and all(cur[c] + k <= targets.get(c, 0) for c, k in cnt.items()):
-            chosen.append(n)
-            cur.update(cnt)
-            if all(cur[c] >= t for c, t in targets.items()):
-                break
-    return chosen, cur
+            chosen.append(n) #list.append(item):把一個新的元素（item）加到這個串列（list）的最尾端
+            cur.update(cnt) #Counter 物件（以及一般字典/集合）非常實用的內建更新與累加方法。
+            if all(cur[c] >= t for c, t in targets.items()): #檢查第一個類別、檢查第2個類別...
+                break #強制跳出當前的迴圈
+    return chosen, cur #回傳 (被選中檔名清單, 實際各類別實例數 Counter)
 
 
 class MixerMixin:
 
-    # ------------------------------------------------------------------ 1. 建立來源池
-    def _scan_source(self, entries, src):
-        """掃描一個來源（可含多個資料夾）。回傳 {輸出檔名: {'img','lines'}}"""
-        pool = {}
+    # --------------- 1. 建立來源池
+    def _scan_source(self, entries, src): #輸入:資料來源字典清單、資料來源字串
+        """掃描來源進行標籤與檔名格式轉換。"""
+        pool = {} #要轉換檔名資料來源底下所有「圖片與標籤資料」的空字典
         for e in entries:
             img_dir, lbl_dir = Path(e['images']), Path(e['labels'])
             if not img_dir.exists() or not lbl_dir.exists():
                 raise FileNotFoundError(f"[{src}] 找不到資料夾: {img_dir} 或 {lbl_dir}")
-            sp = e.get('species')
+            sp = e.get('species') #使用安全取值，如果字典裡面找不到這個鍵，它不會報錯，而是會很安全地回傳 None
             if self.is_mixed and sp not in self.SPECIES_RAW_IDS:
                 raise ValueError(f"[{src}] 混合模式必須指定 species ('cocci'/'bacilli')：{e}")
             if not self.is_mixed and sp is not None and sp != self.name:
                 raise ValueError(f"[{src}] 目前模式是 '{self.name}'，但來源指定了 species='{sp}'，"
                                  f"請只在 SOURCES 放 {self.name} 的資料夾")
-            label_map = self._resolve_label_map(sp if self.is_mixed else None)
+            label_map = self._resolve_label_map(sp if self.is_mixed else None) #dataset_builder.py:混合模式且已知物種 → 該物種的轉換表；其餘 → class_mapping
             prefix = sp if self.is_mixed else 'bact'
 
-            for name in list_image_names(img_dir):
+            for name in list_image_names(img_dir): #影像資料夾內排序後的影像檔名清單(含副檔名)
                 lp = lbl_dir / label_name_of(name) #輸入:影像檔名(含副檔名)  回傳標籤檔名
                 if not lp.exists():
                     continue
-                #回傳:新標籤內容清單、輸出類別ID 集合
+                #回傳:新標籤內容清單(每個字串元素末尾補回 \n)、輸出類別ID 集合
+                #.read_text() 是 Path 專屬的內建方法，它的功能是：直接打開那個檔案，把它裡面的文字內容全部讀出來，變成一串大型的字串
+                #.splitlines():按照換行符號（\n）把這一大串文字切開，變成一個「清單（List）」。清單裡面的每一個元素，剛好就是文字檔裡的「每一列」。
                 lines, _ = convert_label_lines(lp.read_text().splitlines(), label_map) #輸入:標籤內容清單、類別ID對應表
                 pool[f'{prefix}_{src}_{name}'] = {'img': img_dir / name, 'lines': lines}
-        return pool
+        return pool #回傳 {輸出檔名: {'img','lines'}}
 
     def build_source_pool(self, sources, force=False):
-        """把三個來源完整轉標籤後複製到 dataset_mix/pool/。已存在且 force=False 時略過。
-        （來源路徑或內容改變時，請用 force=True 重建）"""
+        """把三個來源完整轉標籤後複製到 dataset_mix/pool/。
+        """
         pool_dir = Path(MIX_ROOT) / f'pool_{self.name}'   # 依模式分開（標籤 ID 與檔名前綴不同）
         self.custom_dataset_dir = pool_dir
         self._cnt_cache = {}
@@ -97,7 +102,8 @@ class MixerMixin:
         (pool_dir / 'images').mkdir(parents=True)
         (pool_dir / 'labels').mkdir(parents=True)
         for s in SOURCE_NAMES:
-            pool = self._scan_source(sources[s], s)
+            #回傳 {輸出檔名: {'img','lines'}}
+            pool = self._scan_source(sources[s], s) #掃描來源進行標籤與檔名格式轉換
             print(f"[{s}] 共 {len(pool)} 張")
             for k, v in pool.items():
                 shutil.copy(v['img'], pool_dir / 'images' / k)
@@ -191,7 +197,7 @@ class MixerMixin:
                 cand = real[tr].tolist() if s == 'dibas' else synth[s]
                 targets = {k: round(N * r) for k in class_ids}
                 sel_seed = self.mix_seed if s == 'dibas' else self.mix_seed + i
-                chosen, cur = greedy_select({n: cnt[n] for n in cand}, targets, sel_seed)
+                chosen, cur = greedy_select({n: cnt[n] for n in cand}, targets, sel_seed) #回傳 (被選中檔名清單, 實際各類別實例數 Counter)
                 train_names += chosen
                 fold_total.update(cur)
                 short = [k for k in class_ids if cur[k] < targets[k] * 0.95]
