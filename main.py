@@ -41,7 +41,7 @@ if __name__ == '__main__':
     }
 
     SAMPLE_SEED = 42                # 抽圖種子，固定才能重現
-
+    
     # ---- 調參設定 ----
     TUNE_ITERATIONS = 50
     # True ：調參資料組成 = 上面的 RATIOS，每個比例組各自調參 50 輪，結果存 tune_{MODE}_{tag}/
@@ -50,8 +50,9 @@ if __name__ == '__main__':
     SHARED_TUNE_RATIOS = {'dibas': 1.0, 'matlab': 0.0, 'diffusion': 0.0}   # 僅上面為 False 時使用
     FORCE_RETUNE = False            # True → 刪掉舊的調參結果並重新跑 50 輪
     # ==============================================================
-
-    tag = f"d{round(RATIOS['dibas']*100)}_m{round(RATIOS['matlab']*100)}_f{round(RATIOS['diffusion']*100)}{SUFFIX}"
+    TARGET_N = 'auto'      # 'auto' = 自動掃描；整數 = 手動指定；None = 各折最小值（舊行為）
+    MAX_DEV = 0.05         # 自動掃描時可接受的各類別最大相對偏差
+    
 
     db = DetectBacteria(MODE)
     db.epoch, db.batch_size, db.img_size = 50, 16, 512
@@ -60,7 +61,16 @@ if __name__ == '__main__':
     db.build_source_pool(SOURCES, force=False)     # 來源路徑/內容有改時請改 True
     if db.is_mixed:
         db.build_merged_test(force=False)
-
+    
+    N_USED = TARGET_N
+    if TARGET_N == 'auto':
+        db.set_mix(RATIOS, 'scan', seed=SAMPLE_SEED)       # 只為了設定 mix_seed
+        N_USED = db.find_best_N(db.image_dir, max_dev=MAX_DEV)
+        if N_USED is None:
+            raise RuntimeError("找不到符合偏差門檻的 N，請放寬 MAX_DEV 或調整 min_N")
+        print(f"\n[自動掃描] 採用 N = {N_USED}")
+    tag = (f"d{round(RATIOS['dibas']*100)}_m{round(RATIOS['matlab']*100)}"
+       f"_f{round(RATIOS['diffusion']*100)}_N{N_USED}{SUFFIX}")
     # ---------- 步驟 1：超參數調優 ----------
     tune_ratios = RATIOS if TUNE_SAME_AS_RATIOS else SHARED_TUNE_RATIOS
     tune_name = f'{MODE}_{tag}' if TUNE_SAME_AS_RATIOS else f'{MODE}{SUFFIX}'
@@ -73,7 +83,7 @@ if __name__ == '__main__':
         print(f"\n[步驟 1/3] 已有調參結果，略過調參: {best_hyp_yaml}")
     else:
         print(f"\n[步驟 1/3] 開始超參數調優（{TUNE_ITERATIONS} 輪），資料組成: {tune_ratios}")
-        db.set_mix(tune_ratios, f'tune_{tune_name}', seed=SAMPLE_SEED)
+        db.set_mix(tune_ratios, f'tune_{tune_name}', seed=SAMPLE_SEED, N=N_USED)
         db.bacteria_names = [tune_name]            # 調參輸出到 tune_{tune_name}
         db.tune_hyperparameters(iterations=TUNE_ITERATIONS, base_model=BASE_MODEL)
 
@@ -90,7 +100,7 @@ if __name__ == '__main__':
         print(f"\n[步驟 2/3] 找不到 {best_hyp_yaml}，使用預設超參數")
 
     # ---------- 步驟 3：本次比例組別的 5 折交叉驗證 ----------
-    db.set_mix(RATIOS, tag, seed=SAMPLE_SEED)
+    db.set_mix(RATIOS, tag, seed=SAMPLE_SEED, N=N_USED)
     db.bacteria_names = [f'{MODE}_{tag}']          # 讓 runs/ 輸出依實驗組別分開
     print(f"\n[步驟 3/3] 開始 5 折交叉驗證訓練（{tag}）...")
     best_result = db.run_cross_validation(num_loops=5, base_model=BASE_MODEL, custom_hyp=best_hyp)

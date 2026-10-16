@@ -138,7 +138,7 @@ class DatasetBuilderMixin:
                 self._convert_label_file(f, dst / f'{species}_{f.name}', species, stats)
                 n += 1
             elif is_image_name(f.name): #輸入影像檔名 回傳布林值
-                shutil.copy(f, dst / f'{species}_{f.name}')
+                shutil.copy(f, dst / f'{species}_{f.name}') #複製的同時指定新檔名
                 n += 1
         print(f"{src} → {dst}: {n} 個檔案")
 
