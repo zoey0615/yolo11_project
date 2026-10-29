@@ -30,7 +30,7 @@ yolo11_project/
     ├── mixer.py                # MixerMixin：三來源固定總量混合資料集
     ├── trainer.py              # TrainerMixin：調參、單折訓練、交叉驗證
     ├── evaluator.py            # EvaluatorMixin：測試集評估、CSV、單張推論
-    └── refacter_all_process.py # 重構流程腳本（請自行補充說明）
+    └── refacter_all_process.py # 重構流程腳本
 ```
 
 ### 模組依賴關係
