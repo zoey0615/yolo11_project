@@ -16,7 +16,7 @@ from yolo11.config import RUNS_DIR
 if __name__ == '__main__':
     # ===================== 要改的參數都在這裡 =====================
     MODE = 'all'                    # 'cocci' / 'bacilli'：2 類；'all'：4 類
-    PRETRAINED = False                    # False → 對照組：不使用預訓練權重（從頭訓練）
+    PRETRAINED = True                   # False → 對照組：不使用預訓練權重（從頭訓練）
     BASE_MODEL = 'yolo11m.pt' if PRETRAINED else 'yolo11m.yaml'
     SUFFIX = '' if PRETRAINED else '_scratch'
 

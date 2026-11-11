@@ -38,7 +38,7 @@ def source_of(name): #利用影像檔名(含副檔名)前綴取得來源字串
 
 def greedy_select(items, targets, seed, time_limit=60):
     """
-    兩階段整數規劃抽圖（函式名稱與回傳格式與舊版相同）。
+    兩階段整數規劃抽圖。
     items:   {檔名: Counter({類別ID: 實例數})}
     targets: {類別ID: 目標實例數}
 
@@ -48,57 +48,69 @@ def greedy_select(items, targets, seed, time_limit=60):
             避免階段 1 只管最差的類別、其他類別被隨意放著。
     每張圖最多選一次（0/1 變數）；seed 只用來在多組最佳解之間打破平手（可重現）。
     """
-    rng = random.Random(seed)
-    names = sorted(items)
+    ###############初始化與資料排序
+    rng = random.Random(seed) #建立獨立的實例Random Number Generator
+    names = sorted(items) #List
     rng.shuffle(names)
 
-    classes = sorted(c for c, t in targets.items() if t > 0)
+    classes = sorted(c for c, t in targets.items() if t > 0) #('key', value) ;List
     if not classes:
         return [], Counter()
-    others = sorted({c for nm in names for c in items[nm]} - set(classes))
+    ###############建立類別索引
+    others = sorted({c for nm in names for c in items[nm]} - set(classes)) #集合{element}
     allc = classes + others
-    idx = {c: j for j, c in enumerate(allc)}
-    n, C = len(names), len(classes)
-
+    idx = {c: j for j, c in enumerate(allc)} #(索引數字, 元素)
+    n, C = len(names), len(classes) #多重賦值
+    ##################建立矩陣與篩選圖片
     M = np.zeros((n, len(allc)))                 # 圖 × 類別 的實例數
     for i, nm in enumerate(names):
-        for c, k in items[nm].items():
-            M[i, idx[c]] = k
-
-    # 含有「沒有目標的類別」的圖不選；空標籤圖也不選（與舊版行為一致）
-    ok_img = (M[:, C:].sum(axis=1) == 0) & (M[:, :C].sum(axis=1) > 0)
-    T = np.array([targets[c] for c in classes], dtype=float)
-    Mc = M[:, :C]
+        for c, k in items[nm].items(): #Counter 物件.items()
+            M[i, idx[c]] = k #把實例數寫入矩陣
+    # 含有「非目標/其他類別」的欄位的圖不選；空標籤圖也不選
+    ok_img = (M[:, C:].sum(axis=1) == 0) & (M[:, :C].sum(axis=1) > 0) #把每一列（Row）裡面的所有欄位（Columns）數值加起來
+   ####################準備最佳化模型需要的資料
+    T = np.array([targets[c] for c in classes], dtype=float) #目標實例數量:目標向量或約束條件的右側常數向量（Right-Hand Side Vector）
+    Mc = M[:, :C] #MILP 限制條件係數的來源矩陣
     eps = np.array([rng.random() for _ in range(n)]) * 1e-7   # 極小成本，只用來打破平手
-    ub_x = ok_img.astype(float)
-    int_x = np.ones(n)
+    ub_x = ok_img.astype(float) #一維的布林陣列 (n,) Upper Bound（上限）
+    int_x = np.ones(n) #告訴 MILP 求解器：圖片選擇變數全部都必須是整數。
 
-    # ---------- 階段 1：最小化最大相對偏差 t ----------
+    # ---------- 階段 1：最小化最大相對偏差 t ----------限制高於目標的偏差
     # 變數 = [x_1..x_n, t]
-    A_over1 = np.hstack([Mc.T, -T[:, None]])      # Σx·M − T·t ≤ T
-    A_under1 = np.hstack([-Mc.T, -T[:, None]])    # −Σx·M − T·t ≤ −T
+    #限制條件係數矩陣(相對偏差公式=|(實際數量-T)|/T=t)
+    #Horizontal Stack
+    A_over1 = np.hstack([Mc.T, -T[:, None]])      # 正向條件Σx·M − T·t ≤ T
+    A_under1 = np.hstack([-Mc.T, -T[:, None]])    # 負向條件−Σx·M − T·t ≤ −T
+    
     res1 = milp(
-        np.concatenate([eps, [1.0]]),
+        np.concatenate([eps, [1.0]]), #目標函數係數(把多個陣列在指定的軸上首尾相接)
+        #限制條件LinearConstraint(係數矩陣,下限,上限)
         constraints=[LinearConstraint(A_over1, -np.inf, T),
                      LinearConstraint(A_under1, -np.inf, -T)],
-        integrality=np.concatenate([int_x, [0]]),
-        bounds=Bounds(np.zeros(n + 1), np.concatenate([ub_x, [np.inf]])),
-        options={'time_limit': time_limit},
+        #變數型態（整數或實數）:LP 鬆弛機制(分支定界法)
+        integrality=np.concatenate([int_x, [0]]), #變數的解是(整數=1)還是(實數=0)(NumPy 的陣列水平拼接函數)
+        #變數的上下界
+        bounds=Bounds(np.zeros(n + 1),  #下界(+1是加最大相對偏差t)
+                      np.concatenate([ub_x, [np.inf]])), #上界
+        options={'time_limit': time_limit}, #求解器最長執行時間限制
     )
     if res1.x is None:
         raise RuntimeError(f"MILP 階段1 無解：{res1.message}")
-    t_star = float(res1.x[n])
+    t_star = float(res1.x[n]) #最佳解向量(一維陣列)
     print(f"    階段1 最大相對偏差 t = {t_star:.3%}"
           f"（status={res1.status}，0=已證明最佳，1=超時）")
     res = res1
 
-    # ---------- 階段 2：固定 t ≤ t*，最小化各類別偏差總和 ----------
-    # 變數 = [x_1..x_n, u_1..u_C]，u_c = 類別 c 的相對偏差
-    t_cap = t_star * (1 + 1e-6) + 1e-9            # 留一點浮點誤差空間
+    # ---------- 階段 2：固定 t ≤ t*，最小化各類別偏差總和 ----------限制低於目標的偏差
+    # 變數 = [x_1..x_n, u_1..u_C]，u_c = 單一類別 c 的相對偏差
+    t_cap = t_star * (1 + 1e-6) + 1e-9            # 最大相對偏差:留一點浮點誤差空間
+    #限制條件係數矩陣(不等式左半邊):電腦求解器（SciPy 的 milp）只接受「小於等於」的標準式子
+    #相對偏差公式=|(實際數量-T)|/T<=u_c ); 變數左邊常數右邊
     A_over2 = np.hstack([Mc.T, -np.diag(T)])      # Σx·M_c − T_c·u_c ≤ T_c
     A_under2 = np.hstack([-Mc.T, -np.diag(T)])    # −Σx·M_c − T_c·u_c ≤ −T_c
     res2 = milp(
-        np.concatenate([eps, np.ones(C)]),
+         #目標函數(最小化各類別偏差總和)係數
+        np.concatenate([eps, np.ones(C)]), # 讓每一個類別的偏差權重都是 1
         constraints=[LinearConstraint(A_over2, -np.inf, T),
                      LinearConstraint(A_under2, -np.inf, -T)],
         integrality=np.concatenate([int_x, np.zeros(C)]),
